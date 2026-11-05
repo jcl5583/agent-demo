@@ -76,7 +76,8 @@ def call_tool(name, args, retries=2):
 
 TOOLS_BY_NAME = {"add": add, "get_weather": get_weather}
 
-TRACE_DIR = "traces"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TRACE_DIR = os.path.join(BASE_DIR, "traces")
 TRACE_FILE = os.path.join(TRACE_DIR, "traces.jsonl")
 
 
@@ -156,6 +157,7 @@ tests = [
     "你是谁？",
 ]
 
-for q in tests:
-    print(f"\n【问题】{q}")
-    print(run(q))
+if __name__ == "__main__":
+    for q in tests:
+        print(f"\n【问题】{q}")
+        print(run(q))
