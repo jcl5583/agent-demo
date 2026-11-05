@@ -1,6 +1,8 @@
 import os
 import json
-
+import time
+import uuid
+from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -74,36 +76,77 @@ def call_tool(name, args, retries=2):
 
 TOOLS_BY_NAME = {"add": add, "get_weather": get_weather}
 
+TRACE_DIR = "traces"
+TRACE_FILE = os.path.join(TRACE_DIR, "traces.jsonl")
 
+
+def save_trace(trace):
+    os.makedirs(TRACE_DIR, exist_ok=True)
+    with open(TRACE_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(trace, ensure_ascii=False) + "\n")
 def run(question, max_steps=5):
+    trace = {
+        "id": uuid.uuid4().hex[:8],
+        "question": question,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "steps": [],
+        "answer": None,
+        "status": "running",
+    }
+
     messages = [{"role": "user", "content": question}]
 
-    for step in range(max_steps):
-        resp = client.chat.completions.create(
-            model=os.getenv("LLM_MODEL"),
-            messages=messages,
-            tools=tools,
-        )
-        msg = resp.choices[0].message
-        messages.append(msg)
+    try:
+        for step in range(max_steps):
+            resp = client.chat.completions.create(
+                model=os.getenv("LLM_MODEL"),
+                messages=messages,
+                tools=tools,
+            )
+            msg = resp.choices[0].message
+            messages.append(msg)
 
-        names = [c.function.name for c in (msg.tool_calls or [])]
-        print(f"  [第 {step + 1} 轮] 调用: {names or '无（直接回答）'}")
+            names = [c.function.name for c in (msg.tool_calls or [])]
+            print(f"  [第 {step + 1} 轮] {names or '无（直接回答）'}")
 
-        if not msg.tool_calls:
-            return msg.content
+            if not msg.tool_calls:
+                trace["answer"] = msg.content
+                trace["status"] = "ok"
+                return msg.content
 
-        for call in msg.tool_calls:
-            args = json.loads(call.function.arguments)
-            result = call_tool(call.function.name, args)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": str(result),
-            })
+            for call in msg.tool_calls:
+                args = json.loads(call.function.arguments)
+                t0 = time.perf_counter()
+                result = call_tool(call.function.name, args)
+                ms = round((time.perf_counter() - t0) * 1000)
 
-    return "超过最大步数，未完成"
+                print(f"      → {call.function.name}({args}) = {result}  [{ms}ms]")
 
+                trace["steps"].append({
+                    "round": step + 1,
+                    "tool": call.function.name,
+                    "args": args,
+                    "result": result,
+                    "ms": ms,
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": str(result),
+                })
+
+        trace["answer"] = "超过最大步数，未完成"
+        trace["status"] = "max_steps"
+        return trace["answer"]
+
+    except Exception as e:
+        trace["status"] = "error"
+        trace["answer"] = f"运行出错：{e}"
+        print(f"  ✗ 出错：{e}")
+        return trace["answer"]
+
+    finally:
+        save_trace(trace)
 
 tests = [
     "北京天气怎么样？",
