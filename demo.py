@@ -2,6 +2,8 @@ import os
 import json
 import time
 import uuid
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -32,7 +34,7 @@ tools = [{
     "type": "function",
     "function": {
         "name": "get_weather",
-        "description": "查询指定城市今天的天气",
+        "description": "查询指定城市当前的实时天气（温度和天气状况）",
         "parameters": {
             "type": "object",
             "properties": {
@@ -50,17 +52,50 @@ def add(a, b):
 
 _attempts = {}        # 记录每个城市被调了几次
 
+
+
+WMO = {
+    0: "晴", 1: "晴间多云", 2: "多云", 3: "阴",
+    45: "雾", 48: "雾凇",
+    51: "小毛毛雨", 53: "毛毛雨", 55: "大毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨",
+    71: "小雪", 73: "中雪", 75: "大雪",
+    80: "阵雨", 81: "强阵雨", 82: "暴雨",
+    95: "雷暴", 96: "雷暴伴冰雹", 99: "强雷暴伴冰雹",
+}
+
+
 def get_weather(city):
-    _attempts[city] = _attempts.get(city, 0) + 1
+    q = urllib.parse.quote(city)
 
-    if city == "火星":
-        raise RuntimeError("网络超时：无法连接天气服务")
+    geo_url = (
+        "https://geocoding-api.open-meteo.com/v1/search"
+        f"?name={q}&count=1&language=zh&format=json"
+    )
+    with urllib.request.urlopen(geo_url, timeout=10) as r:
+        geo = json.loads(r.read().decode("utf-8"))
 
-    if city == "天津" and _attempts[city] == 1:
-        raise RuntimeError("接口超时（模拟网络抖动）")
+    results = geo.get("results") or []
+    if not results:
+        return f"查不到这个城市：{city}"
 
-    fake = {"北京": "晴，18℃", "上海": "多云，22℃", "成都": "小雨，15℃", "天津": "阴，12℃"}
-    return fake.get(city, "查不到这个城市")
+    lat = results[0]["latitude"]
+    lon = results[0]["longitude"]
+    name = results[0].get("name", city)
+
+    wx_url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&current=temperature_2m,weather_code&timezone=auto"
+    )
+    with urllib.request.urlopen(wx_url, timeout=10) as r:
+        wx = json.loads(r.read().decode("utf-8"))
+
+    cur = wx["current"]
+    temp = cur["temperature_2m"]
+    desc = WMO.get(cur["weather_code"], "未知天气")
+
+    return f"{name}：{desc}，{temp}℃"
 
 def call_tool(name, args, retries=2):
     if name not in TOOLS_BY_NAME:
