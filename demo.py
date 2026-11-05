@@ -1,12 +1,19 @@
-import os
 import json
+import os
+import sqlite3
 import time
-import uuid
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime
+
 from dotenv import load_dotenv
 from openai import OpenAI
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "company.db")
+TRACE_DIR = os.path.join(BASE_DIR, "traces")
+TRACE_FILE = os.path.join(TRACE_DIR, "traces.jsonl")
 
 load_dotenv()
 
@@ -43,15 +50,24 @@ tools = [{
             "required": ["city"],
         },
     },
+}, {
+    "type": "function",
+    "function": {
+        "name": "get_employee",
+        "description": "查询公司员工的部门和月薪，参数是员工姓名",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "员工姓名，例如 张伟"},
+            },
+            "required": ["name"],
+        },
+    },
 }]
 
 
 def add(a, b):
     return a + b
-
-
-_attempts = {}        # 记录每个城市被调了几次
-
 
 
 WMO = {
@@ -97,6 +113,57 @@ def get_weather(city):
 
     return f"{name}：{desc}，{temp}℃"
 
+
+def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS employees (
+                name TEXT PRIMARY KEY,
+                dept TEXT NOT NULL,
+                salary INTEGER NOT NULL
+            )
+        """)
+        rows = [
+            ("张伟", "技术部", 18000),
+            ("李娜", "产品部", 16500),
+            ("王强", "技术部", 21000),
+            ("刘洋", "市场部", 14000),
+            ("陈静", "财务部", 15500),
+        ]
+        conn.executemany(
+            "INSERT OR IGNORE INTO employees (name, dept, salary) VALUES (?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_employee(name):
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT dept, salary FROM employees WHERE name = ?", (name,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return f"查无此人：{name}"
+    dept, salary = row
+    return f"{name}：{dept}，月薪 {salary} 元"
+
+
+TOOLS_BY_NAME = {
+    "add": add,
+    "get_weather": get_weather,
+    "get_employee": get_employee,
+}
+
+
 def call_tool(name, args, retries=2):
     if name not in TOOLS_BY_NAME:
         return f"工具调用失败：不存在名为 {name} 的工具"
@@ -109,17 +176,13 @@ def call_tool(name, args, retries=2):
             print(f"    ⚠ 工具 {name} 第 {attempt} 次失败：{e}")
     return f"工具执行失败：{name} 连续 {retries + 1} 次都没成功，请换个方式回答用户"
 
-TOOLS_BY_NAME = {"add": add, "get_weather": get_weather}
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TRACE_DIR = os.path.join(BASE_DIR, "traces")
-TRACE_FILE = os.path.join(TRACE_DIR, "traces.jsonl")
-
 
 def save_trace(trace):
     os.makedirs(TRACE_DIR, exist_ok=True)
     with open(TRACE_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(trace, ensure_ascii=False) + "\n")
+
+
 def run(question, max_steps=5):
     trace = {
         "id": uuid.uuid4().hex[:8],
@@ -184,11 +247,13 @@ def run(question, max_steps=5):
     finally:
         save_trace(trace)
 
+
 tests = [
     "北京天气怎么样？",
-    "天津天气怎么样？",
     "火星天气怎么样？",
     "3 加 5 等于几？",
+    "张伟的月薪是多少？",
+    "王五的工资是多少？",
     "你是谁？",
 ]
 

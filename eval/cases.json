@@ -18,5 +18,8 @@
   {"id": "t17", "question": "你好", "tools": [], "keywords": []},
   {"id": "t18", "question": "讲个笑话", "tools": [], "keywords": []},
   {"id": "t19", "question": "帮我查杭州天气", "tools": ["get_weather"], "keywords": ["℃"]},
-  {"id": "t20", "question": "5 加 5 等于几？", "tools": ["add"], "keywords": ["10"]}
+  {"id": "t20", "question": "5 加 5 等于几？", "tools": ["add"], "keywords": ["10"]},
+  {"id": "t21", "question": "张伟的月薪是多少？", "tools": ["get_employee"], "keywords": ["18000"]},
+  {"id": "t22", "question": "李娜在哪个部门？", "tools": ["get_employee"], "keywords": ["产品部"]},
+  {"id": "t23", "question": "王五的工资是多少？", "tools": ["get_employee"], "keywords": []}
 ]
