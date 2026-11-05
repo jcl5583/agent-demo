@@ -9,6 +9,7 @@ load_dotenv()
 client = OpenAI(
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL"),
+    timeout=30,
 )
 
 tools = [{
@@ -45,10 +46,31 @@ def add(a, b):
     return a + b
 
 
+_attempts = {}        # 记录每个城市被调了几次
+
 def get_weather(city):
-    fake = {"北京": "晴，18℃", "上海": "多云，22℃", "成都": "小雨，15℃"}
+    _attempts[city] = _attempts.get(city, 0) + 1
+
+    if city == "火星":
+        raise RuntimeError("网络超时：无法连接天气服务")
+
+    if city == "天津" and _attempts[city] == 1:
+        raise RuntimeError("接口超时（模拟网络抖动）")
+
+    fake = {"北京": "晴，18℃", "上海": "多云，22℃", "成都": "小雨，15℃", "天津": "阴，12℃"}
     return fake.get(city, "查不到这个城市")
 
+def call_tool(name, args, retries=2):
+    if name not in TOOLS_BY_NAME:
+        return f"工具调用失败：不存在名为 {name} 的工具"
+
+    func = TOOLS_BY_NAME[name]
+    for attempt in range(1, retries + 2):        # 1 次原始 + retries 次重试
+        try:
+            return func(**args)
+        except Exception as e:
+            print(f"    ⚠ 工具 {name} 第 {attempt} 次失败：{e}")
+    return f"工具执行失败：{name} 连续 {retries + 1} 次都没成功，请换个方式回答用户"
 
 TOOLS_BY_NAME = {"add": add, "get_weather": get_weather}
 
@@ -73,7 +95,7 @@ def run(question, max_steps=5):
 
         for call in msg.tool_calls:
             args = json.loads(call.function.arguments)
-            result = TOOLS_BY_NAME[call.function.name](**args)
+            result = call_tool(call.function.name, args)
             messages.append({
                 "role": "tool",
                 "tool_call_id": call.id,
@@ -84,10 +106,10 @@ def run(question, max_steps=5):
 
 
 tests = [
-    "3 加 5 等于几？",
     "北京天气怎么样？",
-    "3 加 5 等于几？顺便看看北京天气",
-    "先查北京天气，再查上海天气，告诉我温差",
+    "天津天气怎么样？",
+    "火星天气怎么样？",
+    "3 加 5 等于几？",
     "你是谁？",
 ]
 
